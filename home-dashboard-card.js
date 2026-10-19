@@ -21,6 +21,7 @@ const IC = {
   prev: P('<path d="M6 5v14M18 5l-9 7 9 7z"/>'),
   next: P('<path d="M18 5v14M6 5l9 7-9 7z"/>'),
   tv: P('<rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8"/>'),
+  menu: P('<path d="M4 7h16M4 12h16M4 17h16"/>'),
   vol: P('<path d="M4 9v6h4l5 4V5L8 9H4zM16.5 9a4 4 0 0 1 0 6"/>')
 };
 
@@ -132,7 +133,7 @@ const CSS = `
 .tk[data-theme=dark]{--bg:#0e1218;--tile:#171d26;--ink:#eef1f5;--mute:#8892a0;--line:#252d38;--tile-on:#eef1f5;--on-ink:#12171e;--on-mute:#5a6572}
 *{box-sizing:border-box}
 :host{display:block}
-.root{background:var(--bg);padding:24px 20px 48px;min-height:100%;border-radius:var(--ha-card-border-radius,12px)}
+.root{container-type:inline-size;background:var(--bg);padding:24px 20px 48px;min-height:100%;border-radius:var(--ha-card-border-radius,12px)}
 .wrap{max-width:880px;margin:0 auto}
 button{font:inherit;color:inherit;cursor:pointer}
 button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
@@ -162,7 +163,8 @@ h1{margin:6px 0 28px;font-size:clamp(40px,9vw,64px);font-weight:500;letter-spaci
 .grid{--c:var(--cm,2);display:flex;flex-wrap:wrap;gap:12px}
 .grid>.tile{flex:1 1 calc((100% - (var(--c) - 1) * 12px) / var(--c) - .5px);min-width:0}
 .grid>.tile.wfull{flex-basis:100%}
-@media(min-width:760px){.grid{--c:var(--cd,3)}}
+@container (min-width:760px){.grid{--c:var(--cd,3)}}
+@media(max-width:520px),(pointer:coarse) and (max-height:520px){.grid{--c:var(--cm,2)!important}.grid>.tile:not(.wfull){flex-grow:0}}
 .tile{position:relative;display:flex;flex-direction:column;justify-content:space-between;gap:16px;min-height:156px;padding:16px;border-radius:26px;background:var(--tile);transition:background .25s,color .25s}
 .tile.on{background:var(--tile-on);color:var(--on-ink)}
 .hit{display:flex;flex-direction:column;gap:18px;flex:1;background:none;border:0;padding:0;text-align:left}
@@ -200,7 +202,7 @@ input[type=range].sl{--fill:var(--amber);-webkit-appearance:none;appearance:none
 .tp button:disabled,.vb button:disabled{opacity:.35;cursor:default}
 .vl{display:flex;align-items:center;justify-content:center;gap:6px;min-width:70px;font-weight:500;font-variant-numeric:tabular-nums}
 .vl svg{width:18px;height:18px}
-@media(min-width:760px){.tile[data-k=media]{flex-direction:row;align-items:center;gap:24px}.tile[data-k=media] .hit{flex:1}}
+@container (min-width:760px){.tile[data-k=media]{flex-direction:row;align-items:center;gap:24px}.tile[data-k=media] .hit{flex:1}}
 @media(max-width:520px){
 .root{padding:16px 14px 40px}
 :host([data-mobile=fill]) .root,:host([data-mobile=cover][data-edit]) .root{border-radius:0;min-height:calc(100dvh - var(--header-height,56px) - env(safe-area-inset-top,0px))}
@@ -234,6 +236,24 @@ input[type=range].sl{--fill:var(--amber);-webkit-appearance:none;appearance:none
 .tog[aria-pressed=true]::after{transform:translateX(18px)}
 @media(min-width:720px){.grab{display:none}.sheet{left:50%;right:auto;bottom:auto;top:50%;width:min(460px,92vw);border-radius:26px;transform:translate(-50%,-44%);opacity:0;transition:transform .3s,opacity .25s,visibility .3s}.sheet.open{transform:translate(-50%,-50%);opacity:1}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+.menu{display:none;width:40px;height:40px;border-radius:50%;border:0;background:rgba(127,135,145,.18);place-items:center}
+@media(max-width:520px){:host([data-mobile=cover]:not([data-edit])) .menu{display:grid}}
+/* glass: translucent, blurred surfaces with a bright rim, over a wallpaper */
+.tk[data-style=glass]{--tile:rgba(255,255,255,.46);--mute:#4f5965;--line:rgba(255,255,255,.55);--tile-on:rgba(255,255,255,.86);--on-ink:#151a21;--on-mute:#4f5965;--trk:rgba(20,25,35,.14);--pill:rgba(255,255,255,.78);--sheen:rgba(255,255,255,.34);--rim:inset 0 1px 0 rgba(255,255,255,.8),inset 0 0 0 1px rgba(255,255,255,.4),0 10px 30px rgba(30,40,60,.14);--wall:radial-gradient(60% 50% at 12% 8%,#ffd6c2,transparent 70%),radial-gradient(55% 45% at 92% 18%,#c9d8ff,transparent 70%),radial-gradient(70% 55% at 70% 95%,#d9c8ff,transparent 70%),radial-gradient(50% 40% at 5% 85%,#bdeedd,transparent 70%),#eef1f6}
+.tk[data-style=glass][data-theme=dark]{--tile:rgba(30,34,44,.46);--mute:#a3adba;--line:rgba(255,255,255,.14);--tile-on:rgba(240,243,248,.8);--on-ink:#12171e;--on-mute:#55606c;--trk:rgba(255,255,255,.16);--pill:rgba(255,255,255,.2);--sheen:rgba(255,255,255,.1);--rim:inset 0 1px 0 rgba(255,255,255,.22),inset 0 0 0 1px rgba(255,255,255,.08),0 10px 30px rgba(0,0,0,.35);--wall:radial-gradient(60% 50% at 12% 8%,#5a2f4f,transparent 70%),radial-gradient(55% 45% at 92% 18%,#1f3f7a,transparent 70%),radial-gradient(70% 55% at 70% 95%,#3b2a73,transparent 70%),radial-gradient(50% 40% at 5% 85%,#124a44,transparent 70%),#0b0e14}
+.tk[data-style=glass].root{background:var(--wall-img,var(--wall));background-size:cover;background-position:center}
+.tk[data-style=glass] :is(.tile,.chip,.rail,.sel select,.sheet){background-color:var(--tile);background-image:linear-gradient(160deg,var(--sheen),transparent 45%);-webkit-backdrop-filter:blur(24px) saturate(180%);backdrop-filter:blur(24px) saturate(180%);box-shadow:var(--rim);border-color:transparent}
+.tk[data-style=glass] .tile.on{background-color:var(--tile-on)}
+.tk[data-style=glass] .sel select{background-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%238892a0%27 stroke-width=%272%27 stroke-linecap=%27round%27%3E%3Cpath d=%27M6 9l6 6 6-6%27/%3E%3C/svg%3E"),linear-gradient(160deg,var(--sheen),transparent 45%)}
+.tk[data-style=glass] .rail{width:fit-content;max-width:100%;padding:4px;border-radius:999px}
+.tk[data-style=glass] .room[aria-selected=true]{background:var(--pill);color:var(--ink);box-shadow:inset 0 1px 0 rgba(255,255,255,.5)}
+.tk[data-style=glass] .ico,.tk[data-style=glass] .x{background:rgba(255,255,255,.28)}
+.tk[data-style=glass][data-theme=dark] .ico,.tk[data-style=glass][data-theme=dark] .x{background:rgba(255,255,255,.1)}
+.tk[data-style=glass] .tile.on .ico{background:rgba(20,25,35,.08)}
+.tk[data-style=glass] .sheet{background-color:color-mix(in srgb,var(--tile) 60%,var(--tile-on))}
+.tk[data-style=glass] .scrim{background:rgba(0,0,0,.25);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.tk[data-style=glass]{--tile:rgba(255,255,255,.85)}.tk[data-style=glass][data-theme=dark]{--tile:rgba(30,34,44,.9)}}
+@media(prefers-reduced-transparency:reduce){.tk[data-style=glass]{--tile:#fff}.tk[data-style=glass][data-theme=dark]{--tile:#1c222c}.tk[data-style=glass] :is(.tile,.chip,.rail,.sel select,.sheet){-webkit-backdrop-filter:none;backdrop-filter:none}}
 `;
 
 class HomeDashboardCard extends HTMLElement {
@@ -242,6 +262,7 @@ class HomeDashboardCard extends HTMLElement {
     this.attachShadow({ mode: 'open' });
     this._cur = null; this._sheet = null; this._msel = {}; this._mem = {}; this._lastB = {};
     this._drag = false; this._sig = '';
+    this._onLoc = () => this._edit();
     this._ov = document.createElement('div');
     this._ov.attachShadow({ mode: 'open' });
     this._onKey = e => { if (e.key === 'Escape' && this._sheet) this._closeSheet(); };
@@ -255,11 +276,15 @@ class HomeDashboardCard extends HTMLElement {
   }
 
   connectedCallback() {
+    this._edit();
+    requestAnimationFrame(() => this._edit());
+    window.addEventListener('location-changed', this._onLoc);
     document.body.appendChild(this._ov);
     document.addEventListener('keydown', this._onKey);
     window.addEventListener('pointerup', this._onUp);
   }
   disconnectedCallback() {
+    window.removeEventListener('location-changed', this._onLoc);
     this._ov.remove();
     document.removeEventListener('keydown', this._onKey);
     window.removeEventListener('pointerup', this._onUp);
@@ -283,7 +308,12 @@ class HomeDashboardCard extends HTMLElement {
   // HA sets these while the dashboard is being edited / the card is previewed in its editor
   set preview(v) { this._pv = v; this._edit(); }
   set editMode(v) { this._em = v; this._edit(); }
-  _edit() { this.toggleAttribute('data-edit', !!(this._pv || this._em || /[?&]edit=1/.test(location.search))); }
+  _edit() { this.toggleAttribute('data-edit', !!(this._pv || this._em || /[?&]edit=1/.test(location.search) || this._inEditor())); }
+  // edit mode doesn't always show in the URL, but cards are then wrapped in HA's edit chrome
+  _inEditor() {
+    for (let n = this; n; n = n.parentNode || n.host) if (/^(hui-card-options|hui-card-edit-mode|hui-card-preview|hui-dialog-edit-card)$/i.test(n.localName || '')) return true;
+    return false;
+  }
   getCardSize() { return 12; }
   getGridOptions() { return { columns: 'full', min_columns: 6 }; }
 
@@ -438,12 +468,16 @@ class HomeDashboardCard extends HTMLElement {
     return t === 'light' || t === 'dark' ? t : (this._hass.themes && this._hass.themes.darkMode ? 'dark' : 'light');
   }
   _font() { return this._cfg.font_family || '"Instrument Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif'; }
+  _tk() {
+    const c = this._cfg, bg = c.style === 'glass' && c.background ? `;--wall-img:url('${String(c.background).replace(/['\\()\s]/g, ch => '%' + ch.charCodeAt(0).toString(16).padStart(2, '0'))}')` : '';
+    return `data-theme="${this._theme()}" data-style="${c.style === 'glass' ? 'glass' : 'solid'}" style="${esc('--font:' + this._font() + bg)}"`;
+  }
 
   _render() {
     if (!this._hass || !this._rooms) return;
     const r = this._room(this._cur) || this._rooms[0], th = this._theme();
     if (!r) {
-      this.shadowRoot.innerHTML = `<style>${CSS}</style><div class="tk root" data-theme="${th}" style="--font:${this._font()}"><div class="wrap"><p class="sum">No rooms found. Assign devices to areas in Home Assistant, or add rooms in the card editor.</p></div></div>`;
+      this.shadowRoot.innerHTML = `<style>${CSS}</style><div class="tk root" ${this._tk()}><div class="wrap"><p class="sum">No rooms found. Assign devices to areas in Home Assistant, or add rooms in the card editor.</p></div></div>`;
       this._closeSheet(); return;
     }
     const rail = this._rooms.map(x => {
@@ -451,8 +485,8 @@ class HomeDashboardCard extends HTMLElement {
       return `<button class="room" role="tab" data-act="room" data-v="${x.id}" aria-selected="${x.id === r.id}">${esc(x.name)}${lit ? '<i class="dot"></i>' : ''}</button>`;
     }).join('');
     const scenes = this._scenes.map((s, i) => `<button class="chip" data-act="scene" data-v="${i}">${esc(s.name)}</button>`).join('');
-    this.shadowRoot.innerHTML = `<style>${CSS}</style><div class="tk root" data-theme="${th}" style="--font:${this._font()}"><div class="wrap">
-      <header><p class="sum">${esc(this._summary())}</p><div class="scenes">${scenes}</div></header>
+    this.shadowRoot.innerHTML = `<style>${CSS}</style><div class="tk root" ${this._tk()}><div class="wrap">
+      <header><button class="menu" data-act="menu" aria-label="Home Assistant menu">${IC.menu}</button><p class="sum">${esc(this._summary())}</p><div class="scenes">${scenes}</div></header>
       <nav class="rail" role="tablist" aria-label="Rooms">${rail}</nav>
       <h1>${esc(r.name)}</h1>
       <main>${this._lighting(r)}${this._climate(r)}${this._media(r)}</main></div></div>`;
@@ -470,7 +504,7 @@ class HomeDashboardCard extends HTMLElement {
     if (!a) { this._sheet = null; root.innerHTML = ''; return; }
     const ls = this._alights(a);
     const old = root.querySelector('.sh-list'), top = old ? old.scrollTop : 0, o = sh.show ? 'open' : '';
-    root.innerHTML = `<style>${CSS}</style><div class="tk" data-theme="${this._theme()}" style="--font:${this._font()}">
+    root.innerHTML = `<style>${CSS}</style><div class="tk" ${this._tk()}>
       <div class="scrim ${o}" data-act="close"></div>
       <section class="sheet ${o}" role="dialog" aria-modal="true" aria-labelledby="sh-t"><div class="grab"></div>
         <div class="sh-head"><h2 id="sh-t">${esc(a.name)} lights</h2><button class="x" data-act="close" aria-label="Close">${IC.x}</button></div>
@@ -503,6 +537,7 @@ class HomeDashboardCard extends HTMLElement {
     const d = t.dataset, S = this._hass.states;
     switch (d.act) {
       case 'room': this._cur = d.v; this._render(); return;
+      case 'menu': this.dispatchEvent(new Event('hass-toggle-menu', { bubbles: true, composed: true })); return;
       case 'scene': this._scene(+d.v); return;
       case 'ltog': {
         const r = this._room(d.room), a = r.areas[+d.area], ls = this._alights(a), on = ls.filter(l => l.on), k = d.room + d.area;
@@ -687,6 +722,8 @@ class HomeDashboardCardEditor extends HTMLElement {
       <div class="opts">
         <label class="f">Theme<select data-opt="theme">${['auto', 'light', 'dark'].map(v => opt(v, c.theme || 'auto', v[0].toUpperCase() + v.slice(1))).join('')}</select></label>
         <label class="f">On mobile<select data-opt="mobile_layout">${[['fill', 'Fill the screen'], ['cover', 'Full screen, hide HA header'], ['card', 'Regular card']].map(([v, l]) => opt(v, c.mobile_layout || 'fill', l)).join('')}</select></label>
+        <label class="f">Style<select data-opt="style">${[['solid', 'Solid'], ['glass', 'Glass']].map(([v, l]) => opt(v, c.style || 'solid', l)).join('')}</select></label>
+        ${c.style === 'glass' ? `<label class="f">Wallpaper URL<input type="text" data-opt="background" value="${esc(c.background || '')}" placeholder="/local/wallpaper.jpg"></label>` : ''}
         <label class="f">Default room<select data-opt="default_room">${opt('', c.default_room || '', 'First room')}${this._rooms.filter(r => !r.hidden).map(r => opt(r.id, c.default_room, r.name)).join('')}</select></label>
       </div>
       <label class="ck"><input type="checkbox" data-opt="auto_discover"${auto ? ' checked' : ''}> Add a room for every Home Assistant area</label>
@@ -727,7 +764,7 @@ class HomeDashboardCardEditor extends HTMLElement {
     const t = e.target, d = t.dataset;
     if ('opt' in d) {
       if (d.opt === 'auto_discover') this._set('auto_discover', t.checked);
-      else this._set(d.opt, t.value && !(d.opt === 'theme' && t.value === 'auto') && !(d.opt === 'mobile_layout' && t.value === 'fill') ? t.value : undefined);
+      else { const v = t.value.trim(), dflt = { theme: 'auto', mobile_layout: 'fill', style: 'solid' }; this._set(d.opt, v && v !== dflt[d.opt] ? v : undefined); }
     } else if ('ex' in d) {
       const i = +d.ex, id = d.id;
       this._patch(i, r => { r.exclude = t.checked ? arr(r.exclude).filter(x => x !== id) : [...new Set([...arr(r.exclude), id])]; });

@@ -5,9 +5,9 @@
 #   cards:
 #     - type: custom:home-dashboard-card
 #
-# The setup below lists every entity by hand instead. Because none of its rooms
-# has an `area`, auto-discovery stays off; add `area: <area_id>` to a room (or
-# `auto_discover: true`) to pick up entities from your areas as well.
+# The setup below binds each room to its area (so new devices show up on their
+# own) and still lists the main entities by hand, so names and order stay fixed.
+# The HomeKit bridge copies of the fans are excluded so they don't show twice.
 #
 # Entity IDs below were derived from the entity NAMES in your Home Assistant.
 # If something does not show up, check the real ID in Developer tools > States
@@ -43,11 +43,13 @@ views:
         rooms:
           # ------------------------------------------------------------ Study
           - name: Study
+            area: study
+            exclude: [fan.study_fan_homekit]
             presence: binary_sensor.asus_router_someone_at_home
             temperature: sensor.study_aircon_temperature
             humidity: sensor.study_aircon_humidity
             climate: climate.study_aircon
-            fan: fan.study_fan
+            fan: fan.study
             areas:
               - name: Study
                 lights:
@@ -59,16 +61,18 @@ views:
                   - light.cabinet_light
                   - light.study_window_spotlight
                   - light.study_door_spotlight
-                  - light.study_fan_light
+                  - light.study_fan
 
           # ---------------------------------------------------------- Bedroom
           - name: Bedroom
+            area: bedroom
+            exclude: [fan.bedroom_fan_homekit]
             temperature: sensor.qingming_air_monitor_temperature
             humidity: sensor.qingming_air_monitor_humidity
             pm25: sensor.qingming_air_monitor_pm25
             co2: sensor.qingming_air_monitor_co2
             climate: climate.bedroom_aircon
-            fan: fan.bedroom_fan
+            fan: fan.bedroom
             cover: cover.bedroom_curtain
             doors:
               - { name: Master toilet, entity: binary_sensor.master_toilet_door_sensor_door }
@@ -79,7 +83,7 @@ views:
                 lights:
                   - light.bedroom_lights
                   - light.bedroom_spotlights
-                  - light.bedroom_fan_light
+                  - light.bedroom_fan
                   - light.cabinet_left_spotlight
                   - light.cabinet_right_spotlight
               - name: Master toilet
@@ -87,12 +91,14 @@ views:
 
           # ------------------------------------------------------ Living room
           - name: Living room
+            area: living_room
+            exclude: [fan.living_room_fan_homekit]
             temperature: sensor.living_room_aircon_temperature
             humidity: sensor.living_room_aircon_humidity
             climate: climate.living_room_aircon
             fan:
-              - fan.living_room_fan
-              - { name: Dining fan, entity: fan.dining_fan }
+              - fan.living_room
+              - { name: Dining fan, entity: fan.living_room_dining_switch }
             cover: cover.living_room_curtain
             media:
               - { name: Soundbar, entity: media_player.q990c_smartthings }
@@ -104,7 +110,7 @@ views:
                   - light.living_room_lights
                   - light.living_room_floodlights
                   - light.living_room_curtain_led
-                  - light.living_room_fan_light
+                  - light.living_room_fan
                   - light.sofa_left_floodlight
                   - light.sofa_right_floodlight
                   - light.tv_left_floodlight
@@ -116,6 +122,7 @@ views:
 
           # ---------------------------------------------------------- Kitchen
           - name: Kitchen
+            area: kitchen
             fan: switch.kichen_fan_plug      # a plain switch: shows On/Off, no speeds
             areas:
               - name: Kitchen

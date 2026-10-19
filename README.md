@@ -4,7 +4,7 @@ A minimalist but feature-rich Home Assistant dashboard card. Room tabs, with eac
 **Lighting**, **Climate** and **Media** sections. Every section has live stats above its controls.
 
 - Rooms discovered from your Home Assistant areas, with a visual editor to include / exclude entities
-- Full-screen layout on phones
+- Full-screen layout on phones, optional glass style
 - Per-area light cards (e.g. Living room + Entrance) with a group toggle and brightness slider
 - Bottom sheet (modal on desktop) with the individual lights of one area
 - Fan, aircon, curtain and media controls (artwork, transport, volume up/down, device dropdown)
@@ -48,6 +48,8 @@ All of it is saved as YAML, so you can also write it by hand:
 type: custom:home-dashboard-card
 theme: auto            # auto | light | dark
 mobile_layout: fill    # fill | cover | card (see below)
+style: solid           # solid | glass
+background: /local/wallpaper.jpg   # optional, shown behind the glass
 auto_discover: true    # add a room for every HA area
 default_room: living_room
 rooms:                 # only the rooms you want to change
@@ -79,6 +81,15 @@ On screens narrower than 520px:
 - `fill` (default): the card goes edge to edge with no rounded corners and fills the height below the HA header
 - `cover`: the card covers the whole screen, HA header included, and scrolls on its own. It goes back to `fill` while the dashboard is being edited
 - `card`: keeps the regular card look
+
+Phones always get at most two cards per row. An odd card at the end stays half width.
+
+### Glass style
+
+`style: glass` uses translucent, blurred cards with a bright edge over a wallpaper, similar to
+iOS. It works in light and dark mode. Without `background` you get a built-in gradient. Put your
+own image in `config/www/` and set `background: /local/<file>`. If your device has *Reduce
+transparency* turned on, the cards become solid.
 
 ### Manual rooms (older configs)
 
