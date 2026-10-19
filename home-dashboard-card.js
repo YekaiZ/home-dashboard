@@ -2,7 +2,8 @@
  * home-dashboard-card
  * A custom Home Assistant card: room tabs, grouped Lighting / Climate / Media
  * sections with stats, per-area light cards with a bottom-sheet / modal,
- * fan, aircon, curtain and media controls.
+ * fan, aircon, curtain and media controls. Rooms are discovered from Home
+ * Assistant areas; a GUI editor includes / excludes entities per room.
  * Register as a dashboard resource (type: JavaScript module) and use
  * `type: custom:home-dashboard-card`.
  */
@@ -32,11 +33,105 @@ const csub = p => p <= 0 ? 'Closed' : p >= 100 ? 'Open' : Math.round(p) + '% ope
 const BAD = ['unavailable', 'unknown'];
 const OFFISH = ['off', 'unavailable', 'unknown', 'standby'];
 const MODE = { cool: 'Cooling', heat: 'Heating', dry: 'Drying', fan_only: 'Fan only', auto: 'Auto', heat_cool: 'Auto' };
+const avg = ls => Math.round(ls.reduce((s, l) => s + l.b, 0) / ls.length);
+
+/* ---------- discovery ---------- */
+const SENS = { temperature: 'temperature', humidity: 'humidity', pm25: 'pm25', carbon_dioxide: 'co2' };
+const PRES = ['presence', 'occupancy', 'motion'];
+const SINGLE = ['presence', 'temperature', 'humidity', 'pm25', 'co2'];
+const ROLE = { light: 'Light', cover: 'Curtain', presence: 'Presence', door: 'Door', fan: 'Fan', climate: 'Aircon', temperature: 'Temperature', humidity: 'Humidity', pm25: 'PM2.5', co2: 'CO₂', media: 'Media' };
+const GROUPS = [['Lighting', ['light', 'cover', 'presence', 'door']], ['Climate', ['fan', 'climate', 'temperature', 'humidity', 'pm25', 'co2']], ['Media', ['media']]];
+
+// Which part of a room an entity belongs to. `loose` (manual includes) also places switches and any cover.
+function roleOf(id, st, loose) {
+  const dc = st && st.attributes.device_class;
+  switch (id.split('.')[0]) {
+    case 'light': return 'light';
+    case 'fan': return 'fan';
+    case 'climate': return 'climate';
+    case 'media_player': return 'media';
+    case 'cover': return loose || !['garage', 'gate', 'door'].includes(dc) ? 'cover' : null;
+    case 'sensor': return SENS[dc] || null;
+    case 'binary_sensor': return dc === 'door' ? 'door' : PRES.includes(dc) ? 'presence' : null;
+    case 'switch': case 'input_boolean':
+      return loose ? (/fan/i.test(id + ' ' + (st ? st.attributes.friendly_name : '')) ? 'fan' : 'light') : null;
+  }
+  return null;
+}
+
+// Legacy configs (rooms without `area`) don't auto-add areas unless asked to.
+const isAuto = cfg => cfg.auto_discover ?? !arr(cfg.rooms).some(r => !r.area);
+
+// Rooms from `cfg.rooms`, plus every other HA area when auto-discovering. A room bound to `area` gets
+// that area's entities sorted into Lighting / Climate / Media, then its `include` / `exclude` are applied.
+// `all` keeps hidden and empty rooms and excluded entities (flagged `off`) for the editor.
+function buildRooms(cfg, h, all) {
+  const S = h.states, A = h.areas || {}, D = h.devices || {}, E = h.entities || {}, byArea = {};
+  const areaOf = e => e && (e.area_id || (D[e.device_id] || {}).area_id);
+  for (const e of Object.values(E)) {
+    if (e.hidden || e.hidden_by || e.entity_category) continue;
+    const a = areaOf(e); if (a) (byArea[a] = byArea[a] || []).push(e.entity_id);
+  }
+  let conf = arr(cfg.rooms).map((r, ci) => ({ r, ci }));
+  if (isAuto(cfg)) {
+    // follow Home Assistant's area order; rooms without a known area stay first, in config order
+    const order = Object.keys(A), used = new Set(conf.flatMap(x => arr(x.r.area)));
+    order.filter(a => !used.has(a)).forEach(a => conf.push({ r: { area: a }, ci: null }));
+    conf = conf.map((x, i) => ({ x, i, p: order.indexOf(arr(x.r.area)[0]) })).sort((a, b) => a.p - b.p || a.i - b.i).map(o => o.x);
+  }
+  const out = [];
+  for (const { r, ci } of conf) {
+    const aids = arr(r.area).filter(a => A[a]), missing = !!r.area && !aids.length;
+    if (missing && !r.name && !all) continue;
+    const name = r.name || (aids.length ? A[aids[0]].name : missing ? arr(r.area)[0] : 'Room');
+    const ex = new Set(arr(r.exclude).map(x => norm(x).entity)), seen = new Set(), its = [];
+    const add = (o, role, src, sub) => {
+      o = norm(o);
+      if (!o || !o.entity || !role || seen.has(o.entity)) return;
+      seen.add(o.entity); its.push({ ...o, role, src, sub, off: ex.has(o.entity) });
+    };
+    (r.areas || (r.lights ? [{ lights: r.lights }] : [])).forEach(a => arr(a.lights).forEach(l => add(l, 'light', 'cfg', a.name || name)));
+    [['fan', r.fan], ['cover', r.cover], ['media', r.media], ['door', r.doors], ['climate', r.climate], ...SINGLE.map(k => [k, r[k]])]
+      .forEach(([k, v]) => arr(v).forEach(o => add(o, k, 'cfg')));
+    // light cards are split per HA area only when a room spans several areas
+    const found = [], sub = a => aids.length > 1 ? A[a].name : undefined;
+    aids.forEach(a => (byArea[a] || []).forEach(id => { const k = roleOf(id, S[id]); if (k) found.push({ id, k, sub: sub(a) }); }));
+    // skip HA light groups when all their members are in the room anyway
+    const fl = new Set(found.filter(x => x.k === 'light').map(x => x.id));
+    for (const x of found) {
+      const m = x.k === 'light' && S[x.id] ? arr(S[x.id].attributes.entity_id) : [];
+      if (!(m.length && m.every(id => fl.has(id)))) add(x.id, x.k, 'auto', x.sub);
+    }
+    arr(r.include).forEach(o => {
+      o = norm(o); if (!o || !o.entity) return;
+      const a = areaOf(E[o.entity]);
+      add(o, o.role || roleOf(o.entity, S[o.entity], true), 'inc', aids.includes(a) ? sub(a) : undefined);
+    });
+    const live = its.filter(i => !i.off);
+    if (!all && (r.hidden || !live.length)) continue;
+    const pick = k => live.filter(i => i.role === k), areas = [];
+    for (const l of pick('light')) {
+      const n = l.sub || (areas[0] ? areas[0].name : name);
+      let a = areas.find(x => x.name === n);
+      if (!a) areas.push(a = { name: n, lights: [] });
+      a.lights.push(l);
+    }
+    const rank = i => i.src === 'cfg' ? -1 : PRES.indexOf(S[i.entity] ? S[i.entity].attributes.device_class : '');
+    const room = {
+      id: r.id || aids[0] || slug(name), name, ci, area: r.area, hidden: !!r.hidden, missing, items: its, areas,
+      fans: pick('fan'), covers: pick('cover'), media: pick('media'), doors: pick('door'), climates: pick('climate')
+    };
+    SINGLE.forEach(k => { room[k] = pick(k).sort((x, y) => rank(x) - rank(y)).map(i => i.entity)[0]; });
+    out.push(room);
+  }
+  return out;
+}
 
 const CSS = `
 .tk{--bg:#e6eaef;--tile:#fff;--ink:#151a21;--mute:#69737f;--line:#d6dce3;--tile-on:#151a21;--on-ink:#f3f5f7;--on-mute:#a4afbc;--amber:#f2a93b;--blue:#3b8cf0;--violet:#8b83f0;--pink:#e5578a;--green:#2fa16f;--red:#d9534f;--trk:rgba(127,135,145,.3);font:400 16px/1.4 var(--font);color:var(--ink)}
 .tk[data-theme=dark]{--bg:#0e1218;--tile:#171d26;--ink:#eef1f5;--mute:#8892a0;--line:#252d38;--tile-on:#eef1f5;--on-ink:#12171e;--on-mute:#5a6572}
 *{box-sizing:border-box}
+:host{display:block}
 .root{background:var(--bg);padding:24px 20px 48px;min-height:100%;border-radius:var(--ha-card-border-radius,12px)}
 .wrap{max-width:880px;margin:0 auto}
 button{font:inherit;color:inherit;cursor:pointer}
@@ -108,6 +203,9 @@ input[type=range].sl{--fill:var(--amber);-webkit-appearance:none;appearance:none
 @media(min-width:760px){.tile[data-k=media]{flex-direction:row;align-items:center;gap:24px}.tile[data-k=media] .hit{flex:1}}
 @media(max-width:520px){
 .root{padding:16px 14px 40px}
+:host([data-mobile=fill]) .root,:host([data-mobile=cover][data-edit]) .root{border-radius:0;min-height:calc(100dvh - var(--header-height,56px) - env(safe-area-inset-top,0px))}
+:host([data-mobile=cover]:not([data-edit])){position:fixed;inset:0;z-index:10;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+:host([data-mobile=cover]:not([data-edit])) .root{border-radius:0;min-height:100dvh;padding-top:calc(16px + env(safe-area-inset-top,0px));padding-bottom:calc(40px + env(safe-area-inset-bottom,0px))}
 .scenes{overflow-x:auto;scrollbar-width:none;width:calc(100% + 28px);margin:0 -14px;padding:0 14px}
 .scenes::-webkit-scrollbar{display:none}
 .chip{padding:10px 16px}
@@ -167,32 +265,43 @@ class HomeDashboardCard extends HTMLElement {
     window.removeEventListener('pointerup', this._onUp);
   }
 
+  static getConfigElement() { return document.createElement('home-dashboard-card-editor'); }
+  static getStubConfig() { return { auto_discover: true }; }
+
   setConfig(cfg) {
-    if (!cfg || !Array.isArray(cfg.rooms) || !cfg.rooms.length) throw new Error('home-dashboard-card: "rooms" is required');
+    if (!cfg) throw new Error('home-dashboard-card: invalid configuration');
+    if (cfg.rooms != null && !Array.isArray(cfg.rooms)) throw new Error('home-dashboard-card: "rooms" must be a list');
     this._cfg = cfg;
-    this._rooms = cfg.rooms.map(r => {
-      const areas = (r.areas || [{ name: r.name, lights: r.lights }]).map(a => ({ name: a.name || r.name, lights: arr(a.lights).map(norm) }));
-      return { ...r, id: r.id || slug(r.name), areas, fans: arr(r.fan).map(norm), covers: arr(r.cover).map(norm), media: arr(r.media).map(norm), doors: arr(r.doors).map(norm) };
-    });
     this._scenes = [{ name: 'All off', all_off: true }, ...arr(cfg.scenes)];
-    const ids = new Set();
-    for (const r of this._rooms) {
-      r.areas.forEach(a => a.lights.forEach(l => ids.add(l.entity)));
-      [...r.fans, ...r.covers, ...r.media, ...r.doors].forEach(x => ids.add(x.entity));
-      ['climate', 'presence', 'temperature', 'humidity', 'pm25', 'co2'].forEach(k => r[k] && ids.add(r[k]));
-    }
-    this._ids = [...ids];
-    this._prefixes = [...new Set(this._rooms.flatMap(r => [r.name, ...r.areas.map(a => a.name)]).map(n => n.toLowerCase()))].sort((a, b) => b.length - a.length);
-    this._cur = cfg.default_room || this._rooms[0].id;
-    this._sig = '';
+    this._cur = this._cur || cfg.default_room || null;
+    this.dataset.mobile = cfg.mobile_layout || 'fill';
+    this._key = null; this._sig = '';
+    this._maybe();
   }
 
-  set hass(h) { this._hass = h; this._maybe(); }
+  set hass(h) { this._hass = h; this._edit(); this._maybe(); }
+  // HA sets these while the dashboard is being edited / the card is previewed in its editor
+  set preview(v) { this._pv = v; this._edit(); }
+  set editMode(v) { this._em = v; this._edit(); }
+  _edit() { this.toggleAttribute('data-edit', !!(this._pv || this._em || /[?&]edit=1/.test(location.search))); }
   getCardSize() { return 12; }
   getGridOptions() { return { columns: 'full', min_columns: 6 }; }
 
+  // Rebuild rooms when the config, the area / device / entity registries or the set of entities change.
+  _build() {
+    const h = this._hass, key = [this._cfg, h.areas, h.devices, h.entities, Object.keys(h.states).length];
+    if (this._key && key.every((v, i) => v === this._key[i])) return;
+    this._key = key;
+    this._rooms = buildRooms(this._cfg, h);
+    this._ids = [...new Set(this._rooms.flatMap(r => r.items.filter(i => !i.off).map(i => i.entity)))];
+    this._prefixes = [...new Set(this._rooms.flatMap(r => [r.name, ...r.areas.map(a => a.name)]).map(n => n.toLowerCase()))].sort((a, b) => b.length - a.length);
+    if (!this._room(this._cur)) this._cur = (this._room(this._cfg.default_room) || this._rooms[0] || {}).id;
+    this._sig = '';
+  }
+
   _maybe() {
-    if (!this._hass || !this._rooms || this._drag) return;
+    if (!this._hass || !this._cfg || this._drag) return;
+    this._build();
     const h = this._hass;
     let s = h.themes && h.themes.darkMode ? 'd' : 'l';
     for (const id of this._ids) {
@@ -208,7 +317,9 @@ class HomeDashboardCard extends HTMLElement {
 
   /* ---------- helpers ---------- */
   _S(id) { return this._hass.states[id]; }
-  _room(id) { return this._rooms.find(r => r.id === id); }
+  _room(id) { return id == null ? null : this._rooms.find(r => r.id === id || r.name === id); }
+  // switches can be listed as lights, so on / off goes through the homeassistant domain
+  _pow(ids, on) { if (ids.length) this._svc('homeassistant', on ? 'turn_on' : 'turn_off', ids); }
   _svc(dom, srv, ids, data) { this._hass.callService(dom, srv, data || {}, { entity_id: ids }); }
   _name(s) {
     let n = s.attributes.friendly_name || s.entity_id;
@@ -225,7 +336,7 @@ class HomeDashboardCard extends HTMLElement {
   }
   _alights(a) {
     return a.lights.map(l => ({ l, s: this._S(l.entity) })).filter(x => x.s && x.s.state !== 'unavailable')
-      .map(x => ({ id: x.l.entity, on: x.s.state === 'on', b: this._pct(x.s), name: x.l.name || this._name(x.s) }));
+      .map(x => ({ id: x.l.entity, on: x.s.state === 'on', b: this._pct(x.s), name: x.l.name || this._name(x.s), dim: x.l.entity.startsWith('light.') && arr(x.s.attributes.supported_color_modes).join() !== 'onoff' }));
   }
   _num(id) {
     const s = id && this._S(id);
@@ -248,16 +359,17 @@ class HomeDashboardCard extends HTMLElement {
     if (pr && !BAD.includes(pr.state)) stats += this._stat('Presence', `<i class="pip ${pr.state === 'on' ? 'here' : ''}"></i>${pr.state === 'on' ? 'Occupied' : 'Empty'}`);
     if (all.length) {
       stats += this._stat('Lights on', `${on.length} <small>of ${all.length}</small>`);
-      stats += this._stat('Brightness', on.length ? Math.round(on.reduce((s, l) => s + l.b, 0) / on.length) + '%' : 'Off');
+      stats += this._stat('Brightness', on.length ? avg(on) + '%' : 'Off');
     }
     for (const d of r.doors) {
       const s = S[d.entity];
       if (s && !BAD.includes(s.state)) stats += this._stat((d.name || 'Door') + ' door', `<i class="pip ${s.state === 'on' ? '' : 'here'}"></i>${s.state === 'on' ? 'Open' : 'Closed'}`);
     }
     let tiles = areas.map(({ a, i, ls }) => {
-      const o = ls.filter(l => l.on), n = ls.length, avg = o.length ? Math.round(o.reduce((s, l) => s + l.b, 0) / o.length) : 0;
+      const o = ls.filter(l => l.on), od = o.filter(l => l.dim), n = ls.length, av = o.length ? avg(o) : 0, bv = od.length ? avg(od) : 80;
       const nm = multi ? a.name + ' lights' : 'Lights', pre = o.length ? `${o.length} of ${n} on` : 'Off';
-      return `<div class="tile ${o.length ? 'on' : ''}" data-k="light"><button class="hit" data-act="ltog" data-room="${r.id}" data-area="${i}"><span class="ico">${IC.bulb}</span><span><span class="t">${esc(nm)}</span><span class="s">${o.length ? pre + ', ' + avg + '%' : 'Off'}</span></span></button><button class="more" data-act="lopen" data-room="${r.id}" data-area="${i}" aria-label="Show ${esc(nm)}">${n} ${n === 1 ? 'light' : 'lights'} ${IC.chev}</button><input type="range" class="sl" min="5" max="100" value="${avg || 80}" style="--p:${pc(avg || 80, 5, 100)}%" data-gb data-pre="${pre}" data-ids="${o.map(l => l.id).join(',')}" aria-label="${esc(nm)} brightness"${o.length ? '' : ' disabled'}></div>`;
+      const sl = ls.some(l => l.dim) ? `<input type="range" class="sl" min="5" max="100" value="${bv}" style="--p:${pc(bv, 5, 100)}%" data-gb data-pre="${pre}" data-ids="${od.map(l => l.id).join(',')}" aria-label="${esc(nm)} brightness"${od.length ? '' : ' disabled'}>` : '';
+      return `<div class="tile ${o.length ? 'on' : ''}" data-k="light"><button class="hit" data-act="ltog" data-room="${r.id}" data-area="${i}"><span class="ico">${IC.bulb}</span><span><span class="t">${esc(nm)}</span><span class="s">${o.length ? pre + ', ' + av + '%' : 'Off'}</span></span></button><button class="more" data-act="lopen" data-room="${r.id}" data-area="${i}" aria-label="Show ${esc(nm)}">${n} ${n === 1 ? 'light' : 'lights'} ${IC.chev}</button>${sl}</div>`;
     }).join('');
     for (const c of r.covers) {
       const s = S[c.entity]; if (!s || BAD.includes(s.state)) continue;
@@ -268,9 +380,10 @@ class HomeDashboardCard extends HTMLElement {
   }
 
   _climate(r) {
-    const S = this._hass.states, cs = r.climate && S[r.climate];
+    const S = this._hass.states, cls = r.climates.map(c => ({ c, s: S[c.entity] })).filter(x => x.s && !BAD.includes(x.s.state));
     let stats = '';
-    const t = this._num(r.temperature) ?? (cs && cs.attributes.current_temperature != null ? +cs.attributes.current_temperature : null);
+    const ct = cls.map(x => x.s.attributes.current_temperature).find(v => v != null);
+    const t = this._num(r.temperature) ?? (ct != null ? +ct : null);
     if (t != null) stats += this._stat('Temperature', `${t.toFixed(1)}°C`);
     const hu = this._num(r.humidity); if (hu != null) stats += this._stat('Humidity', `${Math.round(hu)}%`);
     const pm = this._num(r.pm25);
@@ -286,10 +399,10 @@ class HomeDashboardCard extends HTMLElement {
       const nm = f.name || (r.fans.length > 1 ? this._name(s) : 'Fan');
       tiles += `<div class="tile ${lv ? 'on' : ''}" data-k="fan" style="--sp:${lv || 1}"><button class="hit" data-act="fan" data-id="${f.entity}" data-n="${n}" data-lv="${lv}"><span class="ico">${IC.fan}</span><span><span class="t">${esc(nm)}</span><span class="s">${lv ? (n > 1 ? 'Speed ' + lv : 'On') : 'Off'}</span></span></button>${n > 1 ? `<div class="lv">${Array.from({ length: n }, (_, i) => `<i class="${lv > i ? 'f' : ''}"></i>`).join('')}</div>` : ''}</div>`;
     }
-    if (cs && !BAD.includes(cs.state)) {
-      const a = cs.attributes, on = cs.state !== 'off', tt = a.temperature;
-      const tv = tt == null ? '–' : (Number.isInteger(+tt) ? +tt : (+tt).toFixed(1));
-      tiles += `<div class="tile ${on ? 'on' : ''}" data-k="cool"><button class="hit" data-act="ac" data-id="${r.climate}"><span class="ico">${IC.snow}</span><span><span class="t">Aircon</span><span class="s">${on ? (MODE[cs.state] || cs.state) + (tt != null ? ' to ' + tv + '°' : '') : 'Off'}</span></span></button><div class="step"><button data-act="tm" data-id="${r.climate}" aria-label="Cooler">−</button><b>${tv}°</b><button data-act="tp" data-id="${r.climate}" aria-label="Warmer">+</button></div></div>`;
+    for (const { c, s: cs } of cls) {
+      const a = cs.attributes, on = cs.state !== 'off', tt = a.temperature, id = c.entity;
+      const tv = tt == null ? '–' : (Number.isInteger(+tt) ? +tt : (+tt).toFixed(1)), nm = c.name || (cls.length > 1 ? this._name(cs) : 'Aircon');
+      tiles += `<div class="tile ${on ? 'on' : ''}" data-k="cool"><button class="hit" data-act="ac" data-id="${id}"><span class="ico">${IC.snow}</span><span><span class="t">${esc(nm)}</span><span class="s">${on ? (MODE[cs.state] || cs.state) + (tt != null ? ' to ' + tv + '°' : '') : 'Off'}</span></span></button><div class="step"><button data-act="tm" data-id="${id}" aria-label="Cooler">−</button><b>${tv}°</b><button data-act="tp" data-id="${id}" aria-label="Warmer">+</button></div></div>`;
     }
     return this._group('Climate', stats, tiles);
   }
@@ -314,7 +427,7 @@ class HomeDashboardCard extends HTMLElement {
     let n = 0, ac = 0; const occ = [];
     for (const r of this._rooms) {
       r.areas.forEach(a => { n += this._alights(a).filter(l => l.on).length; });
-      const c = r.climate && this._S(r.climate); if (c && !['off', ...BAD].includes(c.state)) ac++;
+      ac += r.climates.filter(c => { const s = this._S(c.entity); return s && !['off', ...BAD].includes(s.state); }).length;
       const p = r.presence && this._S(r.presence); if (p && p.state === 'on') occ.push(r.name);
     }
     return [n ? n + (n === 1 ? ' light' : ' lights') + ' on' : 'All lights off', ac ? ac + ' aircon running' : '', occ.length ? occ.join(', ') + ' occupied' : ''].filter(Boolean).join(', ');
@@ -329,6 +442,10 @@ class HomeDashboardCard extends HTMLElement {
   _render() {
     if (!this._hass || !this._rooms) return;
     const r = this._room(this._cur) || this._rooms[0], th = this._theme();
+    if (!r) {
+      this.shadowRoot.innerHTML = `<style>${CSS}</style><div class="tk root" data-theme="${th}" style="--font:${this._font()}"><div class="wrap"><p class="sum">No rooms found. Assign devices to areas in Home Assistant, or add rooms in the card editor.</p></div></div>`;
+      this._closeSheet(); return;
+    }
     const rail = this._rooms.map(x => {
       const lit = x.areas.some(a => this._alights(a).some(l => l.on));
       return `<button class="room" role="tab" data-act="room" data-v="${x.id}" aria-selected="${x.id === r.id}">${esc(x.name)}${lit ? '<i class="dot"></i>' : ''}</button>`;
@@ -349,15 +466,16 @@ class HomeDashboardCard extends HTMLElement {
 
   _renderSheet() {
     const sh = this._sheet, root = this._ov.shadowRoot;
-    if (!sh) { root.innerHTML = ''; return; }
-    const r = this._room(sh.room), a = r.areas[sh.area], ls = this._alights(a);
+    const r = sh && this._room(sh.room), a = r && r.areas[sh.area];
+    if (!a) { this._sheet = null; root.innerHTML = ''; return; }
+    const ls = this._alights(a);
     const old = root.querySelector('.sh-list'), top = old ? old.scrollTop : 0, o = sh.show ? 'open' : '';
     root.innerHTML = `<style>${CSS}</style><div class="tk" data-theme="${this._theme()}" style="--font:${this._font()}">
       <div class="scrim ${o}" data-act="close"></div>
       <section class="sheet ${o}" role="dialog" aria-modal="true" aria-labelledby="sh-t"><div class="grab"></div>
         <div class="sh-head"><h2 id="sh-t">${esc(a.name)} lights</h2><button class="x" data-act="close" aria-label="Close">${IC.x}</button></div>
         <div class="sh-act"><button class="chip" data-act="aall" data-v="1">All on</button><button class="chip" data-act="aall" data-v="0">All off</button></div>
-        <div class="sh-list">${ls.map(l => `<div class="row ${l.on ? 'on' : ''}"><button class="tog" data-act="l" data-id="${l.id}" aria-pressed="${l.on}" aria-label="${esc(l.name)}"></button><div class="name"><span>${esc(l.name)}</span><span class="val">${l.on ? l.b + '%' : 'Off'}</span></div><input type="range" class="sl" min="5" max="100" value="${l.b}" style="--p:${pc(l.b, 5, 100)}%" data-b="${l.id}" aria-label="${esc(l.name)} brightness"></div>`).join('')}</div>
+        <div class="sh-list">${ls.map(l => `<div class="row ${l.on ? 'on' : ''}"><button class="tog" data-act="l" data-id="${l.id}" aria-pressed="${l.on}" aria-label="${esc(l.name)}"></button><div class="name"><span>${esc(l.name)}</span><span class="val">${l.on ? (l.dim ? l.b + '%' : 'On') : 'Off'}</span></div>${l.dim ? `<input type="range" class="sl" min="5" max="100" value="${l.b}" style="--p:${pc(l.b, 5, 100)}%" data-b="${l.id}" aria-label="${esc(l.name)} brightness">` : ''}</div>`).join('')}</div>
       </section></div>`;
     const nl = root.querySelector('.sh-list'); if (nl) nl.scrollTop = top;
   }
@@ -388,16 +506,16 @@ class HomeDashboardCard extends HTMLElement {
       case 'scene': this._scene(+d.v); return;
       case 'ltog': {
         const r = this._room(d.room), a = r.areas[+d.area], ls = this._alights(a), on = ls.filter(l => l.on), k = d.room + d.area;
-        if (on.length) { this._mem[k] = on.map(l => l.id); this._svc('light', 'turn_off', on.map(l => l.id)); }
-        else { const m = (this._mem[k] || []).filter(id => ls.some(l => l.id === id)); this._svc('light', 'turn_on', m.length ? m : ls.map(l => l.id)); }
+        if (on.length) { this._mem[k] = on.map(l => l.id); this._pow(on.map(l => l.id), false); }
+        else { const m = (this._mem[k] || []).filter(id => ls.some(l => l.id === id)); this._pow(m.length ? m : ls.map(l => l.id), true); }
         return;
       }
       case 'lopen': this._open(d.room, +d.area); return;
       case 'close': this._closeSheet(); return;
-      case 'l': this._svc('light', S[d.id].state === 'on' ? 'turn_off' : 'turn_on', d.id); return;
+      case 'l': this._pow([d.id], S[d.id].state !== 'on'); return;
       case 'aall': {
         const sh = this._sheet, ids = this._alights(this._room(sh.room).areas[sh.area]).map(l => l.id);
-        if (ids.length) this._svc('light', d.v === '1' ? 'turn_on' : 'turn_off', ids); return;
+        this._pow(ids, d.v === '1'); return;
       }
       case 'fan': {
         const n = +d.n, lv = +d.lv;
@@ -429,8 +547,7 @@ class HomeDashboardCard extends HTMLElement {
   _scene(i) {
     const sc = this._scenes[i];
     if (sc.all_off) {
-      const ids = this._rooms.flatMap(r => r.areas.flatMap(a => this._alights(a).map(l => l.id)));
-      if (ids.length) this._svc('light', 'turn_off', ids);
+      this._pow(this._rooms.flatMap(r => r.areas.flatMap(a => this._alights(a).map(l => l.id))), false);
       return;
     }
     for (const a of arr(sc.actions)) {
@@ -464,5 +581,162 @@ class HomeDashboardCard extends HTMLElement {
 }
 
 customElements.define('home-dashboard-card', HomeDashboardCard);
+
+/* ---------- editor ---------- */
+const ECSS = `
+:host{display:block}
+*{box-sizing:border-box}
+.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--secondary-text-color)}
+label.ck{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--primary-text-color)}
+input[type=text],select{font:inherit;font-size:14px;color:var(--primary-text-color);background:var(--card-background-color,transparent);border:1px solid var(--divider-color);border-radius:8px;padding:8px 10px;min-width:0}
+input[type=checkbox]{width:18px;height:18px;margin:0;accent-color:var(--primary-color)}
+button{font:inherit;font-size:13px;cursor:pointer;border:1px solid var(--divider-color);background:transparent;color:var(--primary-text-color);border-radius:999px;padding:6px 12px}
+button.pri{background:var(--primary-color);border-color:var(--primary-color);color:var(--text-primary-color,#fff)}
+button.lnk{border:0;padding:4px 6px;color:var(--secondary-text-color)}
+.hint{font-size:12px;color:var(--secondary-text-color);margin:0 0 12px}
+details{border:1px solid var(--divider-color);border-radius:12px;margin-bottom:8px}
+summary{display:flex;align-items:center;gap:8px;padding:12px 14px;cursor:pointer;list-style:none;font-weight:500}
+summary::-webkit-details-marker{display:none}
+summary .c{margin-left:auto;font-size:12px;font-weight:400;color:var(--secondary-text-color)}
+.bd{padding:0 14px 14px;display:flex;flex-direction:column;gap:12px}
+.tag{font-size:11px;font-weight:500;border-radius:999px;padding:2px 8px;background:var(--secondary-background-color);color:var(--secondary-text-color)}
+.tag.w{background:var(--warning-color,#f2a93b);color:#000}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+h4{margin:6px 0 0;font-size:13px;font-weight:600;color:var(--secondary-text-color);text-transform:uppercase;letter-spacing:.04em}
+.ent{display:grid;grid-template-columns:auto 1fr auto auto;gap:2px 10px;align-items:center;padding:6px 0;border-top:1px solid var(--divider-color)}
+.ent .n{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ent .n small{display:block;font-size:12px;color:var(--secondary-text-color)}
+.ent.off .n{opacity:.5;text-decoration:line-through}
+.add{display:grid;grid-template-columns:1fr auto auto;gap:8px}
+.foot{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+`;
+
+class HomeDashboardCardEditor extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    this._open = new Set(); this._key = null;
+    this.shadowRoot.addEventListener('click', e => this._click(e));
+    this.shadowRoot.addEventListener('change', e => this._change(e));
+  }
+  setConfig(cfg) { this._cfg = cfg; this._render(); }
+  set hass(h) {
+    const first = !this._hass, k = [h.areas, h.devices, h.entities, Object.keys(h.states).length];
+    this._hass = h;
+    if (first || !this._key || k.some((v, i) => v !== this._key[i])) { this._key = k; this._render(); }
+  }
+
+  _emit(cfg) {
+    this._cfg = cfg;
+    this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: cfg }, bubbles: true, composed: true }));
+    this._render();
+  }
+  _set(k, v) { const c = { ...this._cfg }; if (v === undefined) delete c[k]; else c[k] = v; this._emit(c); }
+
+  // Edit the config entry for a room, creating one for an auto-discovered area on first change.
+  _patch(i, fn) {
+    const room = this._rooms[i], cfg = { ...this._cfg }, rooms = cfg.rooms = arr(cfg.rooms).map(r => ({ ...r }));
+    let r;
+    if (room.ci != null) r = rooms[room.ci];
+    else { r = { area: room.area }; rooms.push(r); this._open.add('a:' + room.area); }
+    fn(r);
+    for (const k of ['include', 'exclude']) if (r[k] && !r[k].length) delete r[k];
+    if (!r.hidden) delete r.hidden;
+    if (!r.name) delete r.name;
+    this._emit(cfg);
+  }
+  _rkey(r) { return r.ci != null && !r.area ? 'c:' + r.ci : 'a:' + arr(r.area)[0]; }
+
+  _render() {
+    if (!this._hass || !this._cfg) return;
+    const h = this._hass, c = this._cfg, A = h.areas || {};
+    this._rooms = buildRooms(c, h, true);
+    const opt = (v, cur, l) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(l)}</option>`;
+    const fname = id => (h.states[id] && h.states[id].attributes.friendly_name) || id;
+    const rooms = this._rooms.map((r, i) => {
+      const k = this._rkey(r), live = r.items.filter(x => !x.off).length;
+      const groups = GROUPS.map(([g, roles]) => {
+        const its = r.items.filter(x => roles.includes(x.role));
+        if (!its.length) return '';
+        return `<h4>${g}</h4>` + its.map(x => `<div class="ent ${x.off ? 'off' : ''}">
+          <input type="checkbox" data-ex="${i}" data-id="${esc(x.entity)}"${x.off ? '' : ' checked'} aria-label="Show ${esc(fname(x.entity))}">
+          <span class="n">${esc(x.name || fname(x.entity))}<small>${esc(x.entity)}${x.sub && x.sub !== r.name ? ' · ' + esc(x.sub) : ''}</small></span>
+          <span class="tag">${ROLE[x.role]}${x.src === 'inc' ? ' · added' : x.src === 'cfg' ? ' · yaml' : ''}</span>
+          ${x.src === 'inc' ? `<button class="lnk" data-act="rm" data-r="${i}" data-id="${esc(x.entity)}" aria-label="Remove">✕</button>` : '<span></span>'}
+        </div>`).join('');
+      }).join('');
+      return `<details data-k="${esc(k)}"${this._open.has(k) ? ' open' : ''}>
+        <summary>${esc(r.name)}${r.hidden ? ' <span class="tag">hidden</span>' : ''}${r.missing ? ' <span class="tag w">area not found</span>' : ''}<span class="c">${live} ${live === 1 ? 'entity' : 'entities'}</span></summary>
+        <div class="bd">
+          <div class="row2">
+            <label class="f">Name<input type="text" data-name="${i}" value="${esc(r.ci != null && c.rooms[r.ci].name || '')}" placeholder="${esc(r.name)}"></label>
+            <label class="f">Area<select data-area="${i}">${opt('', r.area ? null : '', '— none —')}${Object.values(A).map(a => opt(a.area_id, arr(r.area)[0], a.name)).join('')}</select></label>
+          </div>
+          <label class="ck"><input type="checkbox" data-show="${i}"${r.hidden ? '' : ' checked'}> Show this room</label>
+          ${groups || '<p class="hint">No entities yet. Assign devices to this area in Home Assistant, or add entities below.</p>'}
+          <h4>Add entity</h4>
+          <div class="add"><input type="text" list="ents" data-new="${i}" placeholder="light.example"><select data-role="${i}">${opt('', '', 'Auto')}${Object.entries(ROLE).map(([v, l]) => opt(v, '', l)).join('')}</select><button class="pri" data-act="add" data-r="${i}">Add</button></div>
+          <div class="foot"><span></span>${r.ci != null ? `<button data-act="del" data-r="${i}">${r.area && isAuto(c) ? 'Reset room' : 'Remove room'}</button>` : ''}</div>
+        </div></details>`;
+    }).join('');
+    const opn = this.shadowRoot.querySelectorAll('details');
+    if (opn.length) { this._open = new Set([...this._open].filter(k => this._rooms.some(r => this._rkey(r) === k))); opn.forEach(d => d.open ? this._open.add(d.dataset.k) : this._open.delete(d.dataset.k)); }
+    const auto = isAuto(c);
+    this.shadowRoot.innerHTML = `<style>${ECSS}</style>
+      <div class="opts">
+        <label class="f">Theme<select data-opt="theme">${['auto', 'light', 'dark'].map(v => opt(v, c.theme || 'auto', v[0].toUpperCase() + v.slice(1))).join('')}</select></label>
+        <label class="f">On mobile<select data-opt="mobile_layout">${[['fill', 'Fill the screen'], ['cover', 'Full screen, hide HA header'], ['card', 'Regular card']].map(([v, l]) => opt(v, c.mobile_layout || 'fill', l)).join('')}</select></label>
+        <label class="f">Default room<select data-opt="default_room">${opt('', c.default_room || '', 'First room')}${this._rooms.filter(r => !r.hidden).map(r => opt(r.id, c.default_room, r.name)).join('')}</select></label>
+      </div>
+      <label class="ck"><input type="checkbox" data-opt="auto_discover"${auto ? ' checked' : ''}> Add a room for every Home Assistant area</label>
+      <p class="hint">Lights, fans, aircons, curtains, media players and temperature / humidity / PM2.5 / CO₂ / presence / door sensors in an area are picked up automatically. Untick an entity to exclude it.</p>
+      ${rooms || '<p class="hint">No rooms yet.</p>'}
+      <button data-act="new">+ Add room</button>
+      <datalist id="ents">${Object.keys(h.states).sort().map(id => `<option value="${esc(id)}">${esc(fname(id))}</option>`).join('')}</datalist>`;
+  }
+
+  _click(e) {
+    const t = e.target.closest('[data-act]'); if (!t) return;
+    const d = t.dataset, i = +d.r;
+    switch (d.act) {
+      case 'new': {
+        const rooms = [...arr(this._cfg.rooms), { name: 'New room' }];
+        this._open.add('c:' + (rooms.length - 1));
+        this._emit({ ...this._cfg, rooms }); return;
+      }
+      case 'del': {
+        const rooms = arr(this._cfg.rooms).filter((_, j) => j !== this._rooms[i].ci);
+        const c = { ...this._cfg, rooms }; if (!rooms.length) delete c.rooms;
+        this._emit(c); return;
+      }
+      case 'rm': this._patch(i, r => { r.include = arr(r.include).filter(x => norm(x).entity !== d.id); r.exclude = arr(r.exclude).filter(x => x !== d.id); }); return;
+      case 'add': {
+        const inp = this.shadowRoot.querySelector(`[data-new="${i}"]`), id = inp.value.trim(), role = this.shadowRoot.querySelector(`[data-role="${i}"]`).value;
+        if (!this._hass.states[id]) { inp.setCustomValidity('Unknown entity'); inp.reportValidity(); return; }
+        if (!role && !roleOf(id, this._hass.states[id], true)) { inp.setCustomValidity('Pick a type for this entity'); inp.reportValidity(); return; }
+        this._patch(i, r => {
+          r.exclude = arr(r.exclude).filter(x => x !== id);
+          if (!this._rooms[i].items.some(x => x.entity === id)) r.include = [...arr(r.include).filter(x => norm(x).entity !== id), role ? { entity: id, role } : id];
+        });
+      }
+    }
+  }
+
+  _change(e) {
+    const t = e.target, d = t.dataset;
+    if ('opt' in d) {
+      if (d.opt === 'auto_discover') this._set('auto_discover', t.checked);
+      else this._set(d.opt, t.value && !(d.opt === 'theme' && t.value === 'auto') && !(d.opt === 'mobile_layout' && t.value === 'fill') ? t.value : undefined);
+    } else if ('ex' in d) {
+      const i = +d.ex, id = d.id;
+      this._patch(i, r => { r.exclude = t.checked ? arr(r.exclude).filter(x => x !== id) : [...new Set([...arr(r.exclude), id])]; });
+    } else if ('show' in d) this._patch(+d.show, r => { r.hidden = !t.checked; });
+    else if ('name' in d) this._patch(+d.name, r => { r.name = t.value.trim(); });
+    else if ('area' in d) this._patch(+d.area, r => { if (t.value) r.area = t.value; else delete r.area; if (!r.area && !r.name) r.name = this._rooms[+d.area].name; });
+  }
+}
+customElements.define('home-dashboard-card-editor', HomeDashboardCardEditor);
+
 window.customCards = window.customCards || [];
-window.customCards.push({ type: 'home-dashboard-card', name: 'Home dashboard', description: 'Rooms with grouped lighting, climate and media controls.' });
+window.customCards.push({ type: 'home-dashboard-card', name: 'Home dashboard', description: 'Rooms discovered from your areas, with grouped lighting, climate and media controls.', preview: false });

@@ -1,5 +1,14 @@
 # Paste into: Settings > Dashboards > (your new dashboard) > ⋮ > Raw configuration editor
 #
+# Simplest setup: rooms are discovered from your Home Assistant areas.
+#
+#   cards:
+#     - type: custom:home-dashboard-card
+#
+# The setup below lists every entity by hand instead. Because none of its rooms
+# has an `area`, auto-discovery stays off; add `area: <area_id>` to a room (or
+# `auto_discover: true`) to pick up entities from your areas as well.
+#
 # Entity IDs below were derived from the entity NAMES in your Home Assistant.
 # If something does not show up, check the real ID in Developer tools > States
 # and edit it here. Entities that don't exist or are unavailable are skipped.
@@ -12,6 +21,7 @@ views:
     cards:
       - type: custom:home-dashboard-card
         theme: auto        # auto | light | dark
+        mobile_layout: fill   # fill | cover (hide HA header) | card
         # font_family: '"Instrument Sans", sans-serif'   # optional
 
         # "All off" is built in. Add your own with a list of service calls.
