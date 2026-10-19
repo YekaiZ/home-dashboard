@@ -1,0 +1,129 @@
+# Paste into: Settings > Dashboards > (your new dashboard) > ⋮ > Raw configuration editor
+#
+# Entity IDs below were derived from the entity NAMES in your Home Assistant.
+# If something does not show up, check the real ID in Developer tools > States
+# and edit it here. Entities that don't exist or are unavailable are skipped.
+
+title: Home
+views:
+  - title: Home
+    path: home
+    panel: true            # one full-width card, no extra margins
+    cards:
+      - type: custom:home-dashboard-card
+        theme: auto        # auto | light | dark
+        # font_family: '"Instrument Sans", sans-serif'   # optional
+
+        # "All off" is built in. Add your own with a list of service calls.
+        scenes:
+          - name: Study focus
+            actions:
+              - service: light.turn_on
+                target: { entity_id: light.study_table_led }
+                data: { brightness_pct: 100 }
+              - service: light.turn_on
+                target: { entity_id: light.study_my_desk_spotlight }
+                data: { brightness_pct: 70 }
+          - name: Evening
+            actions:
+              - service: light.turn_on
+                target: { entity_id: [light.living_room_lights, light.living_room_curtain_led] }
+                data: { brightness_pct: 40 }
+
+        rooms:
+          # ------------------------------------------------------------ Study
+          - name: Study
+            presence: binary_sensor.asus_router_someone_at_home
+            temperature: sensor.study_aircon_temperature
+            humidity: sensor.study_aircon_humidity
+            climate: climate.study_aircon
+            fan: fan.study_fan
+            areas:
+              - name: Study
+                lights:
+                  - light.study_table_led
+                  - light.study_lights
+                  - light.study_spotlights
+                  - light.study_my_desk_spotlight
+                  - light.study_bb_desk_spotlight
+                  - light.cabinet_light
+                  - light.study_window_spotlight
+                  - light.study_door_spotlight
+                  - light.study_fan_light
+
+          # ---------------------------------------------------------- Bedroom
+          - name: Bedroom
+            temperature: sensor.qingming_air_monitor_temperature
+            humidity: sensor.qingming_air_monitor_humidity
+            pm25: sensor.qingming_air_monitor_pm25
+            co2: sensor.qingming_air_monitor_co2
+            climate: climate.bedroom_aircon
+            fan: fan.bedroom_fan
+            cover: cover.bedroom_curtain
+            doors:
+              - { name: Master toilet, entity: binary_sensor.master_toilet_door_sensor_door }
+            media:
+              - { name: Apple TV, entity: media_player.apple_tv }
+            areas:
+              - name: Bedroom
+                lights:
+                  - light.bedroom_lights
+                  - light.bedroom_spotlights
+                  - light.bedroom_fan_light
+                  - light.cabinet_left_spotlight
+                  - light.cabinet_right_spotlight
+              - name: Master toilet
+                lights: []          # add the toilet light entity here when it exists in HA
+
+          # ------------------------------------------------------ Living room
+          - name: Living room
+            temperature: sensor.living_room_aircon_temperature
+            humidity: sensor.living_room_aircon_humidity
+            climate: climate.living_room_aircon
+            fan:
+              - fan.living_room_fan
+              - { name: Dining fan, entity: fan.dining_fan }
+            cover: cover.living_room_curtain
+            media:
+              - { name: Soundbar, entity: media_player.q990c_smartthings }
+              - { name: TV, entity: media_player.s95ca_smartthings }
+              - { name: Apple TV, entity: media_player.apple_tv_4k_3rd_gen }
+            areas:
+              - name: Living room
+                lights:
+                  - light.living_room_lights
+                  - light.living_room_floodlights
+                  - light.living_room_curtain_led
+                  - light.living_room_fan_light
+                  - light.sofa_left_floodlight
+                  - light.sofa_right_floodlight
+                  - light.tv_left_floodlight
+                  - light.tv_right_floodlight
+              - name: Entrance
+                lights:
+                  - light.entrance_lights
+                  - light.entrance_spotlight
+
+          # ---------------------------------------------------------- Kitchen
+          - name: Kitchen
+            fan: switch.kichen_fan_plug      # a plain switch: shows On/Off, no speeds
+            areas:
+              - name: Kitchen
+                lights:
+                  - light.kitchen_lights
+                  - light.kitchen_service_yard_spotlight
+                  # light.fridge_floodlight and light.sink_floodlight are
+                  # currently unavailable; add them back when they return.
+
+          # ---------------------------------------------------------- Hallway
+          - name: Hallway
+            doors:
+              - { name: Common toilet, entity: binary_sensor.common_toilet_door_sensor_door }
+            areas:
+              - name: Hallway
+                lights:
+                  - light.hallway_lights
+                  - light.hallway_kitchen_spotlight
+                  - light.hallway_room_spotlight
+              - name: Common toilet
+                lights: []          # add the toilet light entity here when it exists in HA
